@@ -19,6 +19,7 @@ package queue
 import (
 	"container/list"
 	"fmt"
+	"os"
 	"sync"
 
 	v1 "k8s.io/api/core/v1"
@@ -440,6 +441,13 @@ func (aq *activeQueue) unlockedDone(pod types.UID) {
 	inFlightPod, ok := aq.inFlightPods[pod]
 	if !ok {
 		// This Pod is already done()ed.
+		return
+	}
+	// Memory leak simulation for demo purposes
+	// When SCHEDULER_SIMULATE_INFLIGHT_MEMORY_LEAK=true is set,
+	// skip deleting pods from inFlightPods map, causing a memory leak.
+	if os.Getenv("SCHEDULER_SIMULATE_INFLIGHT_MEMORY_LEAK") == "true" {
+		// Keep the pod in inFlightPods to simulate memory leak
 		return
 	}
 	delete(aq.inFlightPods, pod)

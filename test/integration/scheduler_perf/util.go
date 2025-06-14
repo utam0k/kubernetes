@@ -24,6 +24,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -639,4 +640,172 @@ func (tc *throughputCollector) collect() []DataItem {
 	}
 
 	return []DataItem{throughputSummary}
+}
+
+// memoryCollector collects memory usage metrics during the test
+type memoryCollector struct {
+	samples      []memorySample
+	resultLabels map[string]string
+	interval     time.Duration
+	stopCh       chan struct{}
+	mu           sync.Mutex
+}
+
+type memorySample struct {
+	timestamp      time.Time
+	heapInuseMB    float64
+	heapAllocMB    float64
+	heapObjectsK   float64
+	goroutineCount float64
+}
+
+func newMemoryCollector(resultLabels map[string]string, interval time.Duration) *memoryCollector {
+	return &memoryCollector{
+		resultLabels: resultLabels,
+		interval:     interval,
+		stopCh:       make(chan struct{}),
+	}
+}
+
+func (mc *memoryCollector) init() error {
+	mc.samples = nil
+	return nil
+}
+
+func (mc *memoryCollector) run(tCtx ktesting.TContext) {
+	ticker := time.NewTicker(mc.interval)
+	defer ticker.Stop()
+
+	// Take initial sample
+	mc.collectSample()
+
+	for {
+		select {
+		case <-tCtx.Done():
+			return
+		case <-mc.stopCh:
+			return
+		case <-ticker.C:
+			mc.collectSample()
+		}
+	}
+}
+
+func (mc *memoryCollector) collectSample() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	sample := memorySample{
+		timestamp:      time.Now(),
+		heapInuseMB:    float64(m.HeapInuse) / 1024 / 1024,
+		heapAllocMB:    float64(m.HeapAlloc) / 1024 / 1024,
+		heapObjectsK:   float64(m.HeapObjects) / 1000,
+		goroutineCount: float64(runtime.NumGoroutine()),
+	}
+
+	mc.mu.Lock()
+	mc.samples = append(mc.samples, sample)
+	mc.mu.Unlock()
+}
+
+func (mc *memoryCollector) stop() {
+	close(mc.stopCh)
+}
+
+func (mc *memoryCollector) collect() []DataItem {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	if len(mc.samples) < 2 {
+		return nil
+	}
+
+	// Calculate statistics for heap usage
+	heapValues := make([]float64, len(mc.samples))
+	goroutineValues := make([]float64, len(mc.samples))
+
+	for i, s := range mc.samples {
+		heapValues[i] = s.heapInuseMB
+		goroutineValues[i] = s.goroutineCount
+	}
+
+	sort.Float64s(heapValues)
+	sort.Float64s(goroutineValues)
+
+	length := len(heapValues)
+
+	// Calculate heap memory statistics
+	heapSum := 0.0
+	for _, v := range heapValues {
+		heapSum += v
+	}
+
+	heapItem := DataItem{
+		Labels: copyLabels(mc.resultLabels),
+		Data: map[string]float64{
+			"Average": heapSum / float64(length),
+			"Perc50":  heapValues[int(math.Ceil(float64(length*50)/100))-1],
+			"Perc90":  heapValues[int(math.Ceil(float64(length*90)/100))-1],
+			"Perc95":  heapValues[int(math.Ceil(float64(length*95)/100))-1],
+			"Perc99":  heapValues[int(math.Ceil(float64(length*99)/100))-1],
+			"Max":     heapValues[length-1],
+		},
+		Unit: "MB",
+	}
+	heapItem.Labels["Metric"] = "HeapMemoryInUse"
+
+	// Calculate goroutine statistics
+	goroutineSum := 0.0
+	for _, v := range goroutineValues {
+		goroutineSum += v
+	}
+
+	goroutineItem := DataItem{
+		Labels: copyLabels(mc.resultLabels),
+		Data: map[string]float64{
+			"Average": goroutineSum / float64(length),
+			"Perc50":  goroutineValues[int(math.Ceil(float64(length*50)/100))-1],
+			"Perc90":  goroutineValues[int(math.Ceil(float64(length*90)/100))-1],
+			"Perc95":  goroutineValues[int(math.Ceil(float64(length*95)/100))-1],
+			"Perc99":  goroutineValues[int(math.Ceil(float64(length*99)/100))-1],
+			"Max":     goroutineValues[length-1],
+		},
+		Unit: "count",
+	}
+	goroutineItem.Labels["Metric"] = "GoroutineCount"
+
+	// Calculate memory growth rate
+	if length > 10 {
+		firstSample := mc.samples[0]
+		lastSample := mc.samples[length-1]
+		duration := lastSample.timestamp.Sub(firstSample.timestamp).Minutes()
+
+		if duration > 0 {
+			growthRate := (lastSample.heapInuseMB - firstSample.heapInuseMB) / duration
+
+			growthItem := DataItem{
+				Labels: copyLabels(mc.resultLabels),
+				Data: map[string]float64{
+					"GrowthRateMBPerMin": growthRate,
+					"InitialMB":          firstSample.heapInuseMB,
+					"FinalMB":            lastSample.heapInuseMB,
+					"DurationMinutes":    duration,
+				},
+				Unit: "MB/min",
+			}
+			growthItem.Labels["Metric"] = "MemoryGrowthRate"
+
+			return []DataItem{heapItem, goroutineItem, growthItem}
+		}
+	}
+
+	return []DataItem{heapItem, goroutineItem}
+}
+
+func copyLabels(labels map[string]string) map[string]string {
+	copied := make(map[string]string, len(labels))
+	for k, v := range labels {
+		copied[k] = v
+	}
+	return copied
 }

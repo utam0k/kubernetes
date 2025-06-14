@@ -1,0 +1,4 @@
+# Ignore demo results
+demo/baseline/*.json
+demo/leak/*.json
+demo/*.log

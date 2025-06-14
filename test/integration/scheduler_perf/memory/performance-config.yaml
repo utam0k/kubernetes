@@ -1,0 +1,251 @@
+# Memory usage test cases for detecting memory leaks and high memory consumption patterns
+#
+# Labels:
+# - memory-test: test cases specifically designed for memory analysis
+# - memory-leak: test cases to detect potential memory leaks
+# - memory-stress: test cases that put stress on memory usage
+#
+
+- name: MemoryBaseline
+  defaultPodTemplatePath: ../templates/pod-default.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: sleep
+    duration: 10s
+  - opcode: createPods
+    countParam: $measurePods
+    collectMetrics: true
+  - opcode: sleep
+    duration: 30s
+  workloads:
+  - name: 100Nodes_Baseline
+    labels: [memory-test, short]
+    params:
+      initNodes: 100
+      measurePods: 1000
+  - name: 1000Nodes_Baseline
+    labels: [memory-test, memory-demo]
+    params:
+      initNodes: 1000
+      measurePods: 10000
+  - name: 5000Nodes_Baseline
+    labels: [memory-test, memory-stress]
+    params:
+      initNodes: 5000
+      measurePods: 50000
+  - name: 10000Nodes_LongRunning
+    labels: [memory-test, memory-stress, long-running, memory-demo]
+    params:
+      initNodes: 10000
+      measurePods: 100000
+  - name: 15000Nodes_LongRunning
+    labels: [memory-test, memory-stress, long-running, memory-demo]
+    params:
+      initNodes: 15000
+      measurePods: 150000
+
+- name: MemoryWithPodAffinity
+  defaultPodTemplatePath: ../templates/pod-with-pod-affinity.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: createNamespaces
+    count: 10
+  - opcode: sleep
+    duration: 10s
+  - opcode: createPods
+    countParam: $measurePods
+    collectMetrics: true
+  - opcode: sleep
+    duration: 30s
+  workloads:
+  - name: 100Nodes_PodAffinity
+    labels: [memory-test, short]
+    params:
+      initNodes: 100
+      measurePods: 1000
+  - name: 1000Nodes_PodAffinity
+    labels: [memory-test]
+    params:
+      initNodes: 1000
+      measurePods: 10000
+  - name: 5000Nodes_PodAffinity
+    labels: [memory-test, memory-stress]
+    params:
+      initNodes: 5000
+      measurePods: 20000
+
+- name: MemoryWithPodAntiAffinity
+  defaultPodTemplatePath: ../templates/pod-with-pod-anti-affinity.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: createNamespaces
+    count: 10
+  - opcode: sleep
+    duration: 10s
+  - opcode: createPods
+    countParam: $measurePods
+    collectMetrics: true
+  - opcode: sleep
+    duration: 30s
+  workloads:
+  - name: 100Nodes_PodAntiAffinity
+    labels: [memory-test, short]
+    params:
+      initNodes: 100
+      measurePods: 1000
+  - name: 1000Nodes_PodAntiAffinity
+    labels: [memory-test]
+    params:
+      initNodes: 1000
+      measurePods: 10000
+  - name: 5000Nodes_PodAntiAffinity
+    labels: [memory-test, memory-stress]
+    params:
+      initNodes: 5000
+      measurePods: 20000
+
+- name: MemoryWithTopologySpread
+  defaultPodTemplatePath: ../templates/pod-with-topology-spreading.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: sleep
+    duration: 10s
+  - opcode: createPods
+    countParam: $measurePods
+    collectMetrics: true
+  - opcode: sleep
+    duration: 30s
+  workloads:
+  - name: 100Nodes_TopologySpread
+    labels: [memory-test, short]
+    params:
+      initNodes: 100
+      measurePods: 1000
+  - name: 1000Nodes_TopologySpread
+    labels: [memory-test]
+    params:
+      initNodes: 1000
+      measurePods: 10000
+  - name: 5000Nodes_TopologySpread
+    labels: [memory-test, memory-stress]
+    params:
+      initNodes: 5000
+      measurePods: 20000
+
+- name: MemoryLeakDetection
+  defaultPodTemplatePath: ../templates/pod-default.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: createNamespaces
+    count: 3
+    prefix: test-ns
+  # Repeated create/delete cycles to detect memory leaks
+  - opcode: createPods
+    count: 1000
+    namespace: test-ns-0
+  - opcode: deletePods
+    namespace: test-ns-0
+  - opcode: sleep
+    duration: 10s
+  - opcode: createPods
+    count: 1000
+    namespace: test-ns-1
+  - opcode: deletePods
+    namespace: test-ns-1
+  - opcode: sleep
+    duration: 10s
+  - opcode: createPods
+    count: 1000
+    namespace: test-ns-2
+  - opcode: deletePods
+    namespace: test-ns-2
+  - opcode: sleep
+    duration: 10s
+  # Final measurement
+  - opcode: createPods
+    countParam: $measurePods
+    collectMetrics: true
+  - opcode: sleep
+    duration: 30s
+  workloads:
+  - name: 100Nodes_LeakDetection
+    labels: [memory-test, memory-leak, short]
+    params:
+      initNodes: 100
+      measurePods: 100
+  - name: 1000Nodes_LeakDetection
+    labels: [memory-test, memory-leak]
+    params:
+      initNodes: 1000
+      measurePods: 1000
+
+- name: MemoryHighChurn
+  defaultPodTemplatePath: ../templates/pod-default.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: createPods
+    countParam: $initPods
+    collectMetrics: true
+  - opcode: churn
+    mode: recreate
+    number: 1000
+    intervalMilliseconds: 1000
+    templatePaths:
+    - ../templates/pod-default.yaml
+  - opcode: sleep
+    duration: 5m
+  workloads:
+  - name: 100Nodes_HighChurn
+    labels: [memory-test, memory-leak, short]
+    params:
+      initNodes: 100
+      initPods: 500
+  - name: 1000Nodes_HighChurn
+    labels: [memory-test, memory-leak]
+    params:
+      initNodes: 1000
+      initPods: 5000
+
+- name: MemorySteadyState
+  defaultPodTemplatePath: ../templates/pod-default.yaml
+  workloadTemplate:
+  - opcode: createNodes
+    countParam: $initNodes
+  - opcode: createPods
+    countParam: $initPods
+  - opcode: createPods
+    countParam: $measurePods
+    collectMetrics: true
+    steadyState: true
+    duration: 10m
+  workloads:
+  - name: 100Nodes_SteadyState
+    labels: [memory-test, short]
+    params:
+      initNodes: 100
+      initPods: 500
+      measurePods: 100
+  - name: 1000Nodes_SteadyState
+    labels: [memory-test]
+    params:
+      initNodes: 1000
+      initPods: 5000
+      measurePods: 1000
+  - name: 5000Nodes_SteadyState
+    labels: [memory-test, memory-stress]
+    params:
+      initNodes: 5000
+      initPods: 25000
+      measurePods: 5000
+  - name: 10000Nodes_SteadyState_Long
+    labels: [memory-test, memory-stress, long-running]
+    params:
+      initNodes: 10000
+      initPods: 50000
+      measurePods: 50000

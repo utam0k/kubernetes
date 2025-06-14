@@ -1461,6 +1461,14 @@ func stopCollectingMetrics(tCtx ktesting.TContext, collectorCtx ktesting.TContex
 	if collectorCtx == nil {
 		return nil, fmt.Errorf("missing startCollectingMetrics operation before stopping")
 	}
+
+	// Stop collectors that have explicit stop methods
+	for _, collector := range collectors {
+		if stoppable, ok := collector.(interface{ stop() }); ok {
+			stoppable.stop()
+		}
+	}
+
 	collectorCtx.Cancel("collecting metrics, collector must stop first")
 	collectorWG.Wait()
 	var dataItems []DataItem
@@ -1935,10 +1943,17 @@ func getTestDataCollectors(podInformer coreinformers.PodInformer, name string, n
 	if mcc == nil {
 		mcc = &defaultMetricsCollectorConfig
 	}
-	return []testDataCollector{
+	collectors := []testDataCollector{
 		newThroughputCollector(podInformer, map[string]string{"Name": name}, labelSelector, namespaces, throughputErrorMargin),
 		newMetricsCollector(mcc, map[string]string{"Name": name}),
 	}
+
+	// Add memory collector unless explicitly disabled
+	if os.Getenv("DISABLE_MEMORY_COLLECTOR") != "true" {
+		collectors = append(collectors, newMemoryCollector(map[string]string{"Name": name}, 500*time.Millisecond))
+	}
+
+	return collectors
 }
 
 func getNodePreparer(prefix string, cno *createNodesOp, clientset clientset.Interface) (testutils.TestNodePreparer, error) {
